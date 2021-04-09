@@ -41,12 +41,13 @@ module Data.Aeson.Encoding.Builder
 import Prelude.Compat
 
 import Data.Aeson.Internal.Time
+import Data.ByteString.Builder.Scientific (formatScientificBuilder, FPFormat(..))
 import Data.Aeson.Types.Internal (Value (..))
 import Data.ByteString.Builder as B
 import Data.ByteString.Builder.Prim as BP
 import Data.ByteString.Builder.Scientific (scientificBuilder)
 import Data.Char (chr, ord)
-import Data.Scientific (Scientific, base10Exponent, coefficient)
+import Data.Scientific (Scientific, isInteger, base10Exponent)
 import Data.Text.Encoding (encodeUtf8BuilderEscaped)
 import Data.Time (UTCTime(..))
 import Data.Time.Calendar (Day(..), toGregorian)
@@ -136,8 +137,8 @@ c2w c = fromIntegral (ord c)
 -- | Encode a JSON number.
 scientific :: Scientific -> Builder
 scientific s
-    | e < 0 || e > 1024 = scientificBuilder s
-    | otherwise = B.integerDec (coefficient s * 10 ^ e)
+    | e < -1024 || e > 1024 = scientificBuilder s
+    | otherwise = formatScientificBuilder Fixed (if isInteger s then Just 0 else Nothing) s
   where
     e = base10Exponent s
 

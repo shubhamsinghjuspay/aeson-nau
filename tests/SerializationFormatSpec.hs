@@ -117,6 +117,15 @@ jsonExamples =
   , example "Float" "3.14" (3.14 :: Float)
   , example "Pico" "3.14" (3.14 :: Pico)
   , example "Scientific" "3.14" (3.14 :: Scientific)
+  , example "Double" "0.000000000000001" (0.000000000000001 :: Double)
+  , example "Float" "0.000000000000001" (0.000000000000001 :: Float)
+  , example "Scientific" "0.000000000000001" (0.000000000000001 :: Scientific)
+  , example "Double" "0.000000000000001" (0.000000000000001 :: Double)
+  , example "Float" "0.000000000000001" (0.000000000000001 :: Float)
+  , example "Double" "0" (0 :: Double)
+  , example "Double" "123" (123 :: Double)
+  , example "Float" "1000000000000" (1e12 :: Float)
+  , example "Scientific" "1000000000000" (1e12 :: Scientific)
 
   , example "UUID" "\"c2cc10e1-57d6-4b6f-9899-38d972112d8c\"" $ UUID.fromWords
       0xc2cc10e1 0x57d64b6f 0x989938d9 0x72112d8c
