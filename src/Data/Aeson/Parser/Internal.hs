@@ -337,9 +337,8 @@ jstringSlow s' = {-# SCC "jstringSlow" #-} do
     go a c
       | a                  = Just False
       | c == DOUBLE_QUOTE  = Nothing
-      | otherwise = let a' = c == backslash
+      | otherwise = let a' = c == BACKSLASH
                     in Just a'
-      where backslash = BACKSLASH
 
 decodeWith :: Parser Value -> (Value -> Result a) -> L.ByteString -> Maybe a
 decodeWith p to s =
