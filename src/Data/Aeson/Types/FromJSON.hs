@@ -1504,6 +1504,8 @@ instance FromJSON Void where
 
 instance FromJSON Bool where
     parseJSON (Bool b) = pure b
+    parseJSON (String v) | v `elem` ["true","True"] = pure True
+    parseJSON (String v) | v `elem` ["false","False"] = pure False
     parseJSON v = typeMismatch "Bool" v
 
 instance FromJSONKey Bool where
