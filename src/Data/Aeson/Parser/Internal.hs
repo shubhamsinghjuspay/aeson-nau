@@ -204,7 +204,7 @@ objectValues mkObject str val = do
   skipSpace
   w <- A.peekWord8'
   if w == W8_CLOSE_CURLY
-    then A.anyWord8 >> return KM.empty
+    then A.anyWord8 >> return H.empty
     else loop []
  where
   -- Why use acc pattern here, you may ask? because 'H.fromList' use 'unsafeInsert'
