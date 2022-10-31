@@ -377,7 +377,7 @@ jstring_ :: Parser Text
 {-# INLINE jstring_ #-}
 jstring_ = do
   s <- A.takeWhile (\w -> w /= W8_DOUBLE_QUOTE && w /= W8_BACKSLASH && not (testBit w 7))
-  let txt = TE.decodeUtf8 s
+  let txt = TE.decodeLatin1 s
   w <- A.peekWord8
   case w of
     Nothing -> fail "string without end"
