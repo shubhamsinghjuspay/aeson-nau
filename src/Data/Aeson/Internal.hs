@@ -14,9 +14,12 @@
 
 module Data.Aeson.Internal
     (
-      IResult(..)
+      addMessage
+    , customFail
+    , IResult(..)
     , JSONPathElement(..)
     , JSONPath
+    , MErrors(..)
     , (<?>)
     , formatError
     , ifromJSON

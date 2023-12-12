@@ -30,6 +30,7 @@ module Data.Aeson.Types.Internal
     -- * Core JSON types
       Value(..)
     , Array
+    , addMessage
     , emptyArray, isEmptyArray
     , Pair
     , Object
@@ -39,6 +40,7 @@ module Data.Aeson.Types.Internal
     , Parser
     , Result(..)
     , IResult(..)
+    , MErrors(..)
     , JSONPathElement(..)
     , JSONPath
     , iparse
@@ -56,7 +58,7 @@ module Data.Aeson.Types.Internal
     , (<?>)
     -- * Constructors and accessors
     , object
-
+    , customFail
     -- * Generic and TH encoding configuration
     , Options(
           fieldLabelModifier
@@ -123,18 +125,28 @@ data JSONPathElement = Key Text
 type JSONPath = [JSONPathElement]
 
 -- | The internal result of running a 'Parser'.
-data IResult a = IError JSONPath String
+data IResult a = IError JSONPath MErrors
                | ISuccess a
                deriving (Eq, Show, Typeable)
+-- | MErrors = MissingField MissingField ParsingFailedObjectType | TypeMismatch expectedType ActualType ParsingFailedObjectType | TextResponse message ParsingFailedObjectType
+data MErrors =  MissingField { fields :: String, message :: Maybe String }
+              | TypeMismatch { expected :: String, actual :: String, message :: Maybe String }
+              | TextResponse { response :: String, message :: Maybe String }
+        deriving (Eq, Show, Typeable)
 
 -- | The result of running a 'Parser'.
-data Result a = Error String
+data Result a = Error MErrors
               | Success a
                 deriving (Eq, Show, Typeable)
 
 instance NFData JSONPathElement where
   rnf (Key t)   = rnf t
   rnf (Index i) = rnf i
+
+instance NFData MErrors where
+    rnf (MissingField val field) = rnf val `seq` rnf field
+    rnf (TypeMismatch target current field)  = rnf target `seq` rnf current `seq` rnf field
+    rnf (TextResponse val field) = rnf val `seq` rnf field
 
 instance (NFData a) => NFData (IResult a) where
     rnf (ISuccess a)      = rnf a
@@ -162,13 +174,20 @@ instance Monad.Monad IResult where
     IError path err >>= _ = IError path err
     {-# INLINE (>>=) #-}
 
+class Monad.Monad m => CustomFail m where
+  customFail :: MErrors -> m a
+
 #if !(MIN_VERSION_base(4,13,0))
     fail = Fail.fail
     {-# INLINE fail #-}
 #endif
 
+instance CustomFail IResult where
+    customFail err = IError [] err
+    {-# INLINE customFail #-}
+
 instance Fail.MonadFail IResult where
-    fail err = IError [] err
+    fail err = IError [] (TextResponse err Nothing)
     {-# INLINE fail #-}
 
 instance Monad.Monad Result where
@@ -185,8 +204,12 @@ instance Monad.Monad Result where
 #endif
 
 instance Fail.MonadFail Result where
-    fail err = Error err
+    fail err = Error $ TextResponse err Nothing
     {-# INLINE fail #-}
+
+instance CustomFail Result where
+    customFail err = Error err
+    {-# INLINE customFail #-}
 
 instance Applicative IResult where
     pure  = ISuccess
@@ -275,7 +298,7 @@ instance Traversable Result where
     {-# INLINE traverse #-}
 
 -- | Failure continuation.
-type Failure f r   = JSONPath -> String -> f r
+type Failure f r   = JSONPath -> MErrors -> f r
 -- | Success continuation.
 type Success a f r = a -> f r
 
@@ -303,8 +326,12 @@ instance Monad.Monad Parser where
 #endif
 
 instance Fail.MonadFail Parser where
-    fail msg = Parser $ \path kf _ks -> kf (reverse path) msg
+    fail msg = Parser $ \path kf _ks -> kf (reverse path) (TextResponse msg Nothing)
     {-# INLINE fail #-}
+
+instance CustomFail Parser where
+    customFail err = Parser $ \path kf _ks -> kf (reverse path) err
+    {-# INLINE customFail #-}
 
 instance Functor Parser where
     fmap f m = Parser $ \path kf ks -> let ks' a = ks (f a)
@@ -343,6 +370,9 @@ instance Monoid (Parser a) where
 -- | Raise a parsing failure with some custom message.
 parseFail :: String -> Parser a
 parseFail = fail
+
+customParseFail :: MErrors -> Parser a
+customParseFail = customFail
 
 apP :: Parser (a -> b) -> Parser a -> Parser b
 apP d e = do
@@ -487,9 +517,12 @@ parseMaybe m v = runParser (m v) [] (\_ _ -> Nothing) Just
 
 -- | Run a 'Parser' with an 'Either' result type.  If the parse fails,
 -- the 'Left' payload will contain an error message.
-parseEither :: (a -> Parser b) -> a -> Either String b
+parseEither :: (a -> Parser b) -> a -> Either (JSONPath, MErrors) b
 parseEither m v = runParser (m v) [] onError Right
-  where onError path msg = Left (formatError path msg)
+  where
+    onError path (MissingField val field) = Left (path, MissingField val field)
+    onError path (TypeMismatch target current field) = Left (path, TypeMismatch target current field)
+    onError path (TextResponse val field) = Left (path, TextResponse val field)
 {-# INLINE parseEither #-}
 
 -- | Annotate an error message with a
@@ -567,7 +600,7 @@ p <?> pathElem = Parser $ \path kf ks -> runParser p (pathElem:path) kf ks
 -- >     (Foo <$> o .: "someField")
 --
 -- Since 0.6.2.0
-modifyFailure :: (String -> String) -> Parser a -> Parser a
+modifyFailure :: (MErrors -> MErrors) -> Parser a -> Parser a
 modifyFailure f (Parser p) = Parser $ \path kf ks ->
     p path (\p' m -> kf p' (f m)) ks
 
@@ -578,19 +611,26 @@ modifyFailure f (Parser p) = Parser $ \path kf ks ->
 -- 'prependFailure' s = 'modifyFailure' (s '++')
 -- @
 prependFailure :: String -> Parser a -> Parser a
-prependFailure = modifyFailure . (++)
+prependFailure = addMessage
+
+addMessage :: String -> Parser a -> Parser a
+addMessage message' (Parser p) = Parser $ \path kf ks ->
+    p path (\p' m -> kf p' (changeMessage m message')) ks
+    where
+        changeMessage :: MErrors -> String -> MErrors
+        changeMessage originalError newMessage = originalError { message = Just $ (maybe newMessage (\val -> val ++ ", " ++ newMessage) (message originalError))}
 
 -- | Throw a parser error with an additional path.
 --
 -- @since 1.2.1.0
-parserThrowError :: JSONPath -> String -> Parser a
+parserThrowError :: JSONPath -> MErrors -> Parser a
 parserThrowError path' msg = Parser $ \path kf _ks ->
     kf (reverse path ++ path') msg
 
 -- | A handler function to handle previous errors and return to normal execution.
 --
 -- @since 1.2.1.0
-parserCatchError :: Parser a -> (JSONPath -> String -> Parser a) -> Parser a
+parserCatchError :: Parser a -> (JSONPath -> MErrors -> Parser a) -> Parser a
 parserCatchError (Parser p) handler = Parser $ \path kf ks ->
     p path (\e msg -> runParser (handler e msg) path kf ks) ks
 

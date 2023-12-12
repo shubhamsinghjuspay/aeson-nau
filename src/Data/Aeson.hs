@@ -34,7 +34,9 @@ module Data.Aeson
 
     -- ** Direct encoding
     -- $encoding
-      decode
+      addMessage
+    , customFail
+    , decode
     , decode'
     , eitherDecode
     , eitherDecode'
@@ -92,6 +94,8 @@ module Data.Aeson
     , GToJSON
     , GToEncoding
     , GToJSON'
+    , IResult(..)
+    , MErrors(..)
     , ToArgs
     , Zero
     , One
@@ -129,7 +133,7 @@ module Data.Aeson
     , withArray
     , withScientific
     , withBool
-    , withEmbeddedJSON
+    -- , withEmbeddedJSON
     -- * Constructors and accessors
     , Series
     , pairs
@@ -147,17 +151,20 @@ module Data.Aeson
 
 import Prelude.Compat
 
+import Data.HashMap.Strict
+import Data.Text
 import Data.Aeson.Types.FromJSON (ifromJSON, parseIndexedJSON)
 import Data.Aeson.Encoding (encodingToLazyByteString)
-import Data.Aeson.Parser.Internal (decodeWith, decodeStrictWith, eitherDecodeWith, eitherDecodeStrictWith, jsonEOF, json, jsonEOF', json')
+import Data.Aeson.Parser.Internal (decodeWith, decodeStrictWith, eitherDecodeWith, eitherDecodeStrictWith, jsonEOF, json, jsonEOF', json', MErrors(..), IResult(..))
 import Data.Aeson.Types
 import Data.Aeson.Types.Internal (formatError)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
-
+import GHC.Generics (Generic)
 -- | Efficiently serialize a JSON value as a lazy 'L.ByteString'.
 --
 -- This is implemented in terms of the 'ToJSON' class's 'toEncoding' method.
+
 encode :: (ToJSON a) => a -> L.ByteString
 encode = encodingToLazyByteString . toEncoding
 
@@ -246,35 +253,35 @@ eitherFormatError = either (Left . uncurry formatError) Right
 {-# INLINE eitherFormatError #-}
 
 -- | Like 'decode' but returns an error message when decoding fails.
-eitherDecode :: (FromJSON a) => L.ByteString -> Either String a
-eitherDecode = eitherFormatError . eitherDecodeWith jsonEOF ifromJSON
+eitherDecode :: (FromJSON a) => L.ByteString -> Either (JSONPath, MErrors) a
+eitherDecode = eitherDecodeWith jsonEOF ifromJSON
 {-# INLINE eitherDecode #-}
 
 -- | Like 'decodeStrict' but returns an error message when decoding fails.
-eitherDecodeStrict :: (FromJSON a) => B.ByteString -> Either String a
+eitherDecodeStrict :: (FromJSON a) => B.ByteString -> Either (JSONPath, MErrors) a
 eitherDecodeStrict =
-  eitherFormatError . eitherDecodeStrictWith jsonEOF ifromJSON
+  eitherDecodeStrictWith jsonEOF ifromJSON
 {-# INLINE eitherDecodeStrict #-}
 
 -- | Like 'decodeFileStrict' but returns an error message when decoding fails.
-eitherDecodeFileStrict :: (FromJSON a) => FilePath -> IO (Either String a)
+eitherDecodeFileStrict :: (FromJSON a) => FilePath -> IO (Either (JSONPath, MErrors) a)
 eitherDecodeFileStrict =
   fmap eitherDecodeStrict . B.readFile
 {-# INLINE eitherDecodeFileStrict #-}
 
 -- | Like 'decode'' but returns an error message when decoding fails.
-eitherDecode' :: (FromJSON a) => L.ByteString -> Either String a
-eitherDecode' = eitherFormatError . eitherDecodeWith jsonEOF' ifromJSON
+eitherDecode' :: (FromJSON a) => L.ByteString -> Either (JSONPath, MErrors) a
+eitherDecode' = eitherDecodeWith jsonEOF' ifromJSON
 {-# INLINE eitherDecode' #-}
 
 -- | Like 'decodeStrict'' but returns an error message when decoding fails.
-eitherDecodeStrict' :: (FromJSON a) => B.ByteString -> Either String a
+eitherDecodeStrict' :: (FromJSON a) => B.ByteString -> Either (JSONPath, MErrors) a
 eitherDecodeStrict' =
-  eitherFormatError . eitherDecodeStrictWith jsonEOF' ifromJSON
+  eitherDecodeStrictWith jsonEOF' ifromJSON
 {-# INLINE eitherDecodeStrict' #-}
 
 -- | Like 'decodeFileStrict'' but returns an error message when decoding fails.
-eitherDecodeFileStrict' :: (FromJSON a) => FilePath -> IO (Either String a)
+eitherDecodeFileStrict' :: (FromJSON a) => FilePath -> IO (Either (JSONPath, MErrors) a)
 eitherDecodeFileStrict' =
   fmap eitherDecodeStrict' . B.readFile
 {-# INLINE eitherDecodeFileStrict' #-}

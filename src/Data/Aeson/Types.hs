@@ -13,7 +13,9 @@
 module Data.Aeson.Types
     (
     -- * Core JSON types
-      Value(..)
+      addMessage
+    , customFail
+    , Value(..)
     , Encoding
     , unsafeToEncoding
     , fromEncoding
@@ -94,7 +96,7 @@ module Data.Aeson.Types
     , withArray
     , withScientific
     , withBool
-    , withEmbeddedJSON
+    -- , withEmbeddedJSON
 
     , pairs
     , foldable
@@ -144,6 +146,7 @@ module Data.Aeson.Types
     , (<?>)
     , JSONPath
     , JSONPathElement(..)
+    , MErrors(..)
     , formatPath
     , formatRelativePath
     ) where
