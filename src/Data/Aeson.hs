@@ -51,6 +51,8 @@ module Data.Aeson
     , eitherDecodeFileStrict'
     -- * Core JSON types
     , Value(..)
+    , ErrorResp(..)
+    , ErrorType(..)
     , Encoding
     , fromEncoding
     , Array
@@ -149,9 +151,9 @@ import Prelude.Compat
 
 import Data.Aeson.Types.FromJSON (ifromJSON, parseIndexedJSON)
 import Data.Aeson.Encoding (encodingToLazyByteString)
-import Data.Aeson.Parser.Internal (decodeWith, decodeStrictWith, eitherDecodeWith, eitherDecodeStrictWith, jsonEOF, json, jsonEOF', json')
+import Data.Aeson.Parser.Internal (decodeWith, decodeStrictWith, eitherDecodeWith, eitherDecodeStrictWith, jsonEOF, json, jsonEOF', json', addFieldNameToErrorResp)
 import Data.Aeson.Types
-import Data.Aeson.Types.Internal (formatError)
+import Data.Aeson.Types.Internal (IResult(..), ErrorResp(..) , ErrorType(..))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 
@@ -242,7 +244,7 @@ decodeFileStrict' :: (FromJSON a) => FilePath -> IO (Maybe a)
 decodeFileStrict' = fmap decodeStrict' . B.readFile
 
 eitherFormatError :: Either (JSONPath, String) a -> Either String a
-eitherFormatError = either (Left . uncurry formatError) Right
+eitherFormatError = either (Left . uncurry addFieldNameToErrorResp) Right
 {-# INLINE eitherFormatError #-}
 
 -- | Like 'decode' but returns an error message when decoding fails.

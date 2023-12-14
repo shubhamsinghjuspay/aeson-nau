@@ -22,7 +22,8 @@
 module Data.Aeson.Parser.Internal
     (
     -- * Lazy parsers
-      json, jsonEOF
+      addFieldNameToErrorResp
+    , json, jsonEOF
     , jsonWith
     , jsonLast
     , jsonAccum
@@ -52,7 +53,7 @@ import Prelude.Compat
 
 import Control.Applicative ((<|>))
 import Control.Monad (void, when)
-import Data.Aeson.Types.Internal (IResult(..), JSONPath, Object, Result(..), Value(..))
+import Data.Aeson.Types.Internal (IResult(..), JSONPath, Object, Result(..), Value(..), ErrorResp(..), defaultErrorObject, addFieldNameToErrorResp)
 import Data.Attoparsec.ByteString.Char8 (Parser, char, decimal, endOfInput, isDigit_w8, signed, string)
 import Data.Function (fix)
 import Data.Functor.Compat (($>))
@@ -422,8 +423,8 @@ eitherDecodeWith p to s =
     case L.parse p s of
       L.Done _ v     -> case to v of
                           ISuccess a      -> Right a
-                          IError path msg -> Left (path, msg)
-      L.Fail _ ctx msg -> Left ([], buildMsg ctx msg)
+                          IError path err -> Left (path, addFieldNameToErrorResp path err)
+      L.Fail _ ctx msg -> Left ([], show $ defaultErrorObject {message = Just $ buildMsg ctx msg})
   where
     buildMsg :: [String] -> String -> String
     buildMsg [] msg = msg
@@ -434,9 +435,9 @@ eitherDecodeWith p to s =
 eitherDecodeStrictWith :: Parser Value -> (Value -> IResult a) -> B.ByteString
                        -> Either (JSONPath, String) a
 eitherDecodeStrictWith p to s =
-    case either (IError []) to (A.parseOnly p s) of
+    case either (\err -> IError [] $ show $ defaultErrorObject {message = Just $ err}) to (A.parseOnly p s) of
       ISuccess a      -> Right a
-      IError path msg -> Left (path, msg)
+      IError path err -> Left (path, addFieldNameToErrorResp path err)
 {-# INLINE eitherDecodeStrictWith #-}
 
 -- $lazy

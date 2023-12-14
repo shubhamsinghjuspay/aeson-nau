@@ -5,6 +5,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE RecordWildCards #-}
 #if __GLASGOW_HASKELL__ >= 800
 -- a) THQ works on cross-compilers and unregisterised GHCs
 -- b) may make compilation faster as no dynamic loading is ever needed (not sure about this)
@@ -41,6 +42,8 @@ module Data.Aeson.Types.Internal
     , IResult(..)
     , JSONPathElement(..)
     , JSONPath
+    , ErrorResp(..)
+    , ErrorType(..)
     , iparse
     , parse
     , parseEither
@@ -54,6 +57,14 @@ module Data.Aeson.Types.Internal
     , formatPath
     , formatRelativePath
     , (<?>)
+    , getFieldName
+    , getErrorObject
+    , defaultErrorObject
+    , addFieldNameToErrorResp
+    , addObjectType
+    , addMessage
+    , typeMismatchErr
+    , missingFieldErr
     -- * Constructors and accessors
     , object
 
@@ -110,6 +121,7 @@ import qualified Data.HashMap.Strict as H
 import qualified Data.Scientific as S
 import qualified Data.Vector as V
 import qualified Language.Haskell.TH.Syntax as TH
+import Text.Read (readMaybe)
 
 -- | Elements of a JSON path used to describe the location of an
 -- error.
@@ -119,7 +131,7 @@ data JSONPathElement = Key Text
                      | Index {-# UNPACK #-} !Int
                        -- ^ JSON path element of an index into an
                        -- array, \"array[index]\".
-                       deriving (Eq, Show, Typeable, Ord)
+                       deriving (Eq, Show, Typeable, Ord, Read)
 type JSONPath = [JSONPathElement]
 
 -- | The internal result of running a 'Parser'.
@@ -127,6 +139,11 @@ data IResult a = IError JSONPath String
                | ISuccess a
                deriving (Eq, Show, Typeable)
 
+data ErrorResp = ErrorResp {errorType :: ErrorType, field :: Maybe String, objectType :: Maybe String, message :: Maybe String , expected :: Maybe String, actual :: Maybe String, path :: Maybe JSONPath}
+    deriving (Eq, Show, Typeable, Read)
+
+data ErrorType = MISSING_FIELD | TYPE_MISMATCH | GENERAL
+    deriving (Eq, Show, Typeable, Read)
 -- | The result of running a 'Parser'.
 data Result a = Error String
               | Success a
@@ -489,7 +506,7 @@ parseMaybe m v = runParser (m v) [] (\_ _ -> Nothing) Just
 -- the 'Left' payload will contain an error message.
 parseEither :: (a -> Parser b) -> a -> Either String b
 parseEither m v = runParser (m v) [] onError Right
-  where onError path msg = Left (formatError path msg)
+  where onError path msg = Left (addFieldNameToErrorResp path msg)
 {-# INLINE parseEither #-}
 
 -- | Annotate an error message with a
@@ -530,6 +547,71 @@ formatRelativePath path = format "" path
     escapeChar '\\' = "\\\\"
     escapeChar c    = [c]
 
+getFieldName :: JSONPath -> Maybe String
+getFieldName path =
+    format $ reverse path
+    where
+        format :: JSONPath -> Maybe String
+        format []                = Nothing
+        format (Index idx:parts) = format parts
+        format (Key key:_)   = Just $ formatKey key
+
+        formatKey :: Text -> String
+        formatKey key
+            | isIdentifierKey strKey = strKey
+            | otherwise              = escapeKey strKey
+            where strKey = unpack key
+
+        isIdentifierKey :: String -> Bool
+        isIdentifierKey []     = False
+        isIdentifierKey (x:xs) = isAlpha x && all isAlphaNum xs
+
+        escapeKey :: String -> String
+        escapeKey = concatMap escapeChar
+
+        escapeChar :: Char -> String
+        escapeChar '\'' = "\\'"
+        escapeChar '\\' = "\\\\"
+        escapeChar c    = [c]
+
+getErrorObject :: ErrorType -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Maybe JSONPath -> ErrorResp
+getErrorObject errorType field objectType message expected actual path = ErrorResp {..}
+
+defaultErrorObject :: ErrorResp
+defaultErrorObject = ErrorResp GENERAL Nothing Nothing Nothing Nothing Nothing Nothing
+
+addFieldNameToErrorResp :: JSONPath -> String -> String
+addFieldNameToErrorResp path err =
+    case (readMaybe err :: Maybe ErrorResp) of
+        Just err' -> show $ err' {field = maybe (getFieldName path) Just $ field err', path = Just path}
+        Nothing -> err
+
+addObjectType :: String -> Parser a -> Parser a
+addObjectType oType (Parser p) = Parser $ \path kf ks ->
+    p path (\p' m -> kf p' (addObject m oType)) ks
+    where
+        addObject err obj =
+            case (readMaybe err :: Maybe ErrorResp) of
+                Just err' -> show $ err' {objectType = Just oType}
+                Nothing -> err
+
+addMessage :: String -> Parser a -> Parser a
+addMessage mess (Parser p) = Parser $ \path kf ks ->
+    p path (\p' m -> kf p' (go m mess)) ks
+    where
+        go :: String -> String -> String
+        go err mess=
+            case (readMaybe err :: Maybe ErrorResp) of
+                Just err' -> show $ err' {message = Just $ maybe mess (\val -> val ++ "," ++ mess) $ message err'}
+                Nothing -> err
+
+typeMismatchErr :: Maybe String -> String -> String -> String
+typeMismatchErr objectType expected actual = show $
+            defaultErrorObject {errorType = TYPE_MISMATCH, expected = Just $ expected, actual= Just $ actual, objectType = objectType}
+
+missingFieldErr :: Maybe String -> String -> String
+missingFieldErr objectType field = show $
+            defaultErrorObject {errorType = MISSING_FIELD, field = objectType}
 -- | A key\/value pair for an 'Object'.
 type Pair = (Text, Value)
 
