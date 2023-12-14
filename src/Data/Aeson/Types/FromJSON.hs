@@ -485,8 +485,8 @@ genericFromJSONKey :: forall a. (Generic a, GFromJSONKey (Rep a))
              -> FromJSONKeyFunction a
 genericFromJSONKey opts = FromJSONKeyTextParser $ \t ->
     case parseSumFromString (keyModifier opts) t of
-        Nothing -> fail $
-            "invalid key " ++ show t ++ ", expected one of " ++ show cnames
+        Nothing -> fail $ show $
+            defaultErrorObject {errorType = TYPE_MISMATCH, field = Just $ show t, expected = Just $ show cnames}
         Just k -> pure (to k)
   where
     cnames = unTagged2 (constructorTags (keyModifier opts) :: Tagged2 (Rep a) [String])
@@ -513,7 +513,7 @@ typeMismatch :: String -- ^ The name of the JSON type being parsed
              -> Value  -- ^ The actual value encountered.
              -> Parser a
 typeMismatch expected actual =
-    fail $ "expected " ++ expected ++ ", but encountered " ++ typeOf actual
+    fail $ typeMismatchErr Nothing expected (typeOf actual)
 
 -- | Fail parsing due to a type mismatch, when the expected types are implicit.
 --
@@ -522,7 +522,8 @@ typeMismatch expected actual =
 -- > unexpected (String "oops")
 -- > -- Error: "unexpected String"
 unexpected :: Value -> Parser a
-unexpected actual = fail $ "unexpected " ++ typeOf actual
+unexpected actual = fail $ show $
+        defaultErrorObject {errorType = GENERAL, message = Just $ "unexpected " ++ typeOf actual}
 
 -- | JSON type of a value, name of the head constructor.
 typeOf :: Value -> String
@@ -651,7 +652,7 @@ instance (FromJSON a) => FromJSON [a] where
 -- > prependContext "MyType" (fail "[error message]")
 -- > -- Error: "parsing MyType failed, [error message]"
 prependContext :: String -> Parser a -> Parser a
-prependContext name = prependFailure ("parsing " ++ name ++ " failed, ")
+prependContext = addObjectType
 
 -- | @'withObject' name f value@ applies @f@ to the 'Object' when @value@
 -- is an 'Data.Aeson.Object' and fails otherwise.
@@ -765,7 +766,7 @@ withEmbeddedJSON _ innerParser (String txt) =
     either fail innerParser $ eitherDecode (L.fromStrict $ T.encodeUtf8 txt)
     where
         eitherDecode = eitherFormatError . eitherDecodeWith jsonEOF ifromJSON
-        eitherFormatError = either (Left . uncurry formatError) Right
+        eitherFormatError = either (Left . uncurry addFieldNameToErrorResp) Right
 withEmbeddedJSON name _ v = prependContext name (typeMismatch "String" v)
 
 -- | Convert a value from JSON, failing if the types do not match.
@@ -822,7 +823,8 @@ parseFieldMaybe' = (.:!)
 -- E.g. @'explicitParseField' 'parseJSON1' :: ('FromJSON1' f, 'FromJSON' a) -> 'Object' -> 'Text' -> 'Parser' (f a)@
 explicitParseField :: (Value -> Parser a) -> Object -> Text -> Parser a
 explicitParseField p obj key = case H.lookup key obj of
-    Nothing -> fail $ "key " ++ show key ++ " not found"
+    Nothing -> fail $ show $
+        defaultErrorObject {errorType = MISSING_FIELD, field = Just $ unpack $ key}
     Just v  -> p v <?> Key key
 
 -- | Variant of '.:?' with explicit parser function.
@@ -885,9 +887,9 @@ contextType = prependContext
 -- | "contents", where "tag" i-- |s associated to one of ["Foo", "Bar"],
 -- | The parser returned error was: could not find key "tag"
 contextTag :: Text -> [String] -> Parser a -> Parser a
-contextTag tagKey cnames = prependFailure
+contextTag tagKey cnames = addMessage 
   ("expected Object with key \"" ++ unpack tagKey ++ "\"" ++
-  " containing one of " ++ show cnames ++ ", ")
+  " containing one of " ++ show cnames)
 
 -- | Add the name of the constructor being parsed to a parser's error messages.
 contextCons :: ConName -> TypeName -> Parser a -> Parser a
@@ -1011,8 +1013,7 @@ parseAllNullarySum tname opts =
             parseSumFromString modifier tag
   where
     badTag tag = failWithCTags tname modifier $ \cnames ->
-        "expected one of the tags " ++ show cnames ++
-        ", but found tag " ++ show tag
+        typeMismatchErr Nothing (show cnames) (show tag)
     modifier = constructorTagModifier opts
 
 -- | Fail with an informative error message about a mismatched tag.
@@ -1099,8 +1100,7 @@ parseNonAllNullarySum p@(tname :* opts :* _) =
         where
           tagKey = pack tagFieldName
           badTag tag = failWith_ $ \cnames ->
-              "expected tag field to be one of " ++ show cnames ++
-              ", but found tag " ++ show tag
+            typeMismatchErr Nothing (show cnames) (show tag)
           cnames_ = unTagged2 (constructorTags (constructorTagModifier opts) :: Tagged2 f [String])
 
       ObjectWithSingleField ->
@@ -1108,12 +1108,10 @@ parseNonAllNullarySum p@(tname :* opts :* _) =
               [(tag, v)] -> maybe (badTag tag) (<?> Key tag) $
                   parsePair (tag :* p) v
               _ -> contextType tname . fail $
-                  "expected an Object with a single pair, but found " ++
-                  show (H.size obj) ++ " pairs"
+                    typeMismatchErr Nothing "Object with a single pair" ("Object with" ++ show (H.size obj) ++ " pairs")
         where
           badTag tag = failWith_ $ \cnames ->
-              "expected an Object with a single pair where the tag is one of " ++
-              show cnames ++ ", but found tag " ++ show tag
+                typeMismatchErr Nothing ("Object with a single pair where the tag is one of " ++ show cnames) (show tag)
 
       TwoElemArray ->
           withArray tname $ \arr -> case V.length arr of
@@ -1124,12 +1122,10 @@ parseNonAllNullarySum p@(tname :* opts :* _) =
                   contextType tname $
                       fail "tag element is not a String" <?> Index 0
               len -> contextType tname . fail $
-                  "expected a 2-element Array, but encountered an Array of length " ++
-                  show len
+                  typeMismatchErr Nothing ("2-element Array") ("Array of length " ++ show len)
         where
           badTag tag = failWith_ $ \cnames ->
-              "expected tag of the 2-element Array to be one of " ++
-              show cnames ++ ", but found tag " ++ show tag
+            typeMismatchErr Nothing (show cnames) (show tag)
 
       UntaggedValue -> parseUntaggedValue p
   where
@@ -1240,8 +1236,7 @@ instance OVERLAPPING_
             _ -> typeMismatch "Array" v
       where
         fail_ a = fail $
-            "expected an empty Array, but encountered an Array of length " ++
-            show (V.length a)
+            typeMismatchErr Nothing ("empty Array") ("Array of length " ++ show (V.length a))
     {-# INLINE consParseJSON' #-}
 
 instance OVERLAPPING_
@@ -1352,9 +1347,7 @@ productParseJSON0 p@(cname :* tname :* _ :* _) =
         if lenArray == lenProduct
         then productParseJSON p arr 0 lenProduct
         else contextCons cname tname $
-             fail $ "expected an Array of length " ++ show lenProduct ++
-                    ", but encountered an Array of length " ++ show lenArray
-
+             fail $ typeMismatchErr Nothing ("Array of length " ++ show lenProduct) ("Array of length " ++ show lenArray)
 --
 
 class ProductFromJSON arity f where
@@ -1445,8 +1438,7 @@ instance OVERLAPPING_
       where
         tag' = pack $ constructorTagModifier opts cname
         cname = conName (undefined :: M1 _i c _f _p)
-        fail_ tag = fail $
-          "expected tag " ++ show tag' ++ ", but found tag " ++ show tag
+        fail_ tag = fail $ typeMismatchErr Nothing (show tag') (show tag)
     {-# INLINE parseUntaggedValue #-}
 
 -------------------------------------------------------------------------------
@@ -1512,7 +1504,7 @@ instance FromJSONKey Bool where
     fromJSONKey = FromJSONKeyTextParser $ \t -> case t of
         "true"  -> pure True
         "false" -> pure False
-        _       -> fail $ "cannot parse key " ++ show t ++ " into Bool"
+        _       -> fail $ typeMismatchErr Nothing "Bool" "String"
 
 instance FromJSON Ordering where
   parseJSON = withText "Ordering" $ \s ->
@@ -1520,14 +1512,13 @@ instance FromJSON Ordering where
       "LT" -> return LT
       "EQ" -> return EQ
       "GT" -> return GT
-      _ -> fail $ "parsing Ordering failed, unexpected " ++ show s ++
-                  " (expected \"LT\", \"EQ\", or \"GT\")"
+      _ -> fail $ typeMismatchErr (Just "Ordering") "(\"LT\", \"EQ\", \"GT\")" (show s)
 
 instance FromJSON () where
     parseJSON = withArray "()" $ \v ->
                   if V.null v
                     then pure ()
-                    else prependContext "()" $ fail "expected an empty array"
+                    else fail $ typeMismatchErr (Just "()") "empty array" ("array of length " ++ (show $ V.length v))
 
 instance FromJSON Char where
     parseJSON = withText "Char" parseChar
@@ -1615,7 +1606,7 @@ instance FromJSONKey Natural where
 parseNatural :: Integer -> Parser Natural
 parseNatural integer =
     if integer < 0 then
-        fail $ "parsing Natural failed, unexpected negative number " <> show integer
+        fail $ typeMismatchErr (Just "Natural") "positive number" "negative number"
     else
         pure $ fromIntegral integer
 
@@ -1711,7 +1702,7 @@ instance FromJSON1 NonEmpty where
     liftParseJSON p _ = withArray "NonEmpty" $
         (>>= ne) . Tr.sequence . zipWith (parseIndexedJSON p) [0..] . V.toList
       where
-        ne []     = fail "parsing NonEmpty failed, unexpected empty list"
+        ne []     = fail $ typeMismatchErr (Just "NonEmpty") "non-empty list" "empty list"
         ne (x:xs) = pure (x :| xs)
 
 instance (FromJSON a) => FromJSON (NonEmpty a) where
@@ -1742,7 +1733,7 @@ instance FromJSON1 DNE.DNonEmpty where
     liftParseJSON p _ = withArray "DNonEmpty" $
         (>>= ne) . Tr.sequence . zipWith (parseIndexedJSON p) [0..] . V.toList
       where
-        ne []     = fail "parsing DNonEmpty failed, unexpected empty list"
+        ne []     = fail $ typeMismatchErr (Just "DNonEmpty") "non-empty list" "empty list"
         ne (x:xs) = pure (DNE.fromNonEmpty (x :| xs))
 
 -- | @since 1.5.3.0
@@ -1879,7 +1870,7 @@ instance (FromJSON v) => FromJSON (Tree.Tree v) where
 
 instance FromJSON UUID.UUID where
     parseJSON = withText "UUID" $
-        maybe (fail "invalid UUID") pure . UUID.fromText
+        maybe (fail $ show $ defaultErrorObject {message = Just $ "invalid UUID"}) pure . UUID.fromText
 
 instance FromJSONKey UUID.UUID where
     fromJSONKey = FromJSONKeyTextParser $
@@ -2073,7 +2064,7 @@ parseQuarterOfYear t = case T.toLower t of
     "q2" -> return Q2
     "q3" -> return Q3
     "q4" -> return Q4
-    _    -> fail "Invalid quarter of year"
+    _    -> fail $ typeMismatchErr Nothing "(q1, q2, q3, q4)" (show $ T.toLower t)
 
 instance FromJSONKey QuarterOfYear where
     fromJSONKey = FromJSONKeyTextParser parseQuarterOfYear

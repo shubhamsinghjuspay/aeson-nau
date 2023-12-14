@@ -125,7 +125,7 @@ import Prelude (fail)
 import Control.Applicative ((<|>))
 import Data.Aeson (Object, (.:), FromJSON(..), FromJSON1(..), FromJSON2(..), ToJSON(..), ToJSON1(..), ToJSON2(..))
 import Data.Aeson.Types (Options(..), Parser, SumEncoding(..), Value(..), defaultOptions, defaultTaggedObject)
-import Data.Aeson.Types.Internal ((<?>), JSONPathElement(Key))
+import Data.Aeson.Types.Internal ((<?>), JSONPathElement(Key), ErrorResp(..) , ErrorType(..), defaultErrorObject, typeMismatchErr, missingFieldErr)
 import Data.Aeson.Types.FromJSON (parseOptionalFieldWith)
 import Data.Aeson.Types.ToJSON (fromPairs, pair)
 import Control.Monad (liftM2, unless, when)
@@ -1144,52 +1144,46 @@ lookupFieldWith pj tName rec obj key =
 
 unknownFieldFail :: String -> String -> String -> Parser fail
 unknownFieldFail tName rec key =
-    fail $ printf "When parsing the record %s of type %s the key %s was not present."
-                  rec tName key
+    fail $ printf $ missingFieldErr (Just $ tName ++ "(" ++ rec ++ ")") key
 
 noArrayFail :: String -> String -> Parser fail
-noArrayFail t o = fail $ printf "When parsing %s expected Array but got %s." t o
+noArrayFail t o = fail $ printf $ typeMismatchErr (Just t) "Array" o
 
 noObjectFail :: String -> String -> Parser fail
-noObjectFail t o = fail $ printf "When parsing %s expected Object but got %s." t o
+noObjectFail t o = fail $ printf $ typeMismatchErr (Just t) "Object" o
 
 firstElemNoStringFail :: String -> String -> Parser fail
-firstElemNoStringFail t o = fail $ printf "When parsing %s expected an Array of 2 elements where the first element is a String but got %s at the first element." t o
+firstElemNoStringFail t o = fail $ printf $ typeMismatchErr (Just t) "Array of 2 elements where the first element is a String" o
 
 wrongPairCountFail :: String -> String -> Parser fail
 wrongPairCountFail t n =
-    fail $ printf "When parsing %s expected an Object with a single tag/contents pair but got %s pairs."
-                  t n
+    fail $ printf $ typeMismatchErr (Just t) "Object with a single tag/contents pair" n
 
 noStringFail :: String -> String -> Parser fail
-noStringFail t o = fail $ printf "When parsing %s expected String but got %s." t o
+noStringFail t o = fail $ printf $ typeMismatchErr (Just t) "String" o
 
 noMatchFail :: String -> String -> Parser fail
 noMatchFail t o =
-    fail $ printf "When parsing %s expected a String with the tag of a constructor but got %s." t o
+    fail $ printf $ typeMismatchErr (Just t) ("String with the tag of a constructor") o
 
 not2ElemArray :: String -> Int -> Parser fail
-not2ElemArray t i = fail $ printf "When parsing %s expected an Array of 2 elements but got %i elements" t i
+not2ElemArray t i = fail $ printf $ typeMismatchErr (Just t) ("Array of 2 elements") (show i)
 
 conNotFoundFail2ElemArray :: String -> [String] -> String -> Parser fail
 conNotFoundFail2ElemArray t cs o =
-    fail $ printf "When parsing %s expected a 2-element Array with a tag and contents element where the tag is one of [%s], but got %s."
-                  t (intercalate ", " cs) o
+    fail $ printf $ typeMismatchErr (Just t) ("2-element Array with tag or content as" ++ "[" ++ (intercalate ", " cs) ++"]") o
 
 conNotFoundFailObjectSingleField :: String -> [String] -> String -> Parser fail
 conNotFoundFailObjectSingleField t cs o =
-    fail $ printf "When parsing %s expected an Object with a single tag/contents pair where the tag is one of [%s], but got %s."
-                  t (intercalate ", " cs) o
+    fail $ printf $ typeMismatchErr (Just t) ("["++ (intercalate ", " cs) ++"]") o
 
 conNotFoundFailTaggedObject :: String -> [String] -> String -> Parser fail
 conNotFoundFailTaggedObject t cs o =
-    fail $ printf "When parsing %s expected an Object with a tag field where the value is one of [%s], but got %s."
-                  t (intercalate ", " cs) o
+    fail $ printf $ typeMismatchErr (Just t) ("["++ (intercalate ", " cs) ++"]") o
 
 parseTypeMismatch' :: String -> String -> String -> String -> Parser fail
 parseTypeMismatch' conName tName expected actual =
-    fail $ printf "When parsing the constructor %s of type %s expected %s but got %s."
-                  conName tName expected actual
+    fail $ printf $ typeMismatchErr (Just $ tName ++ "(" ++ conName ++")") expected actual
 
 --------------------------------------------------------------------------------
 -- Shared ToJSON and FromJSON code
