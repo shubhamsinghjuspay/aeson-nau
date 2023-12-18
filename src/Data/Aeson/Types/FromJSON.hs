@@ -486,7 +486,7 @@ genericFromJSONKey :: forall a. (Generic a, GFromJSONKey (Rep a))
 genericFromJSONKey opts = FromJSONKeyTextParser $ \t ->
     case parseSumFromString (keyModifier opts) t of
         Nothing -> fail $ show $
-            defaultErrorObject {errorType = TYPE_MISMATCH, field = Just $ show t, expected = Just $ show cnames}
+            defaultErrorObject {errorType = TYPE_MISMATCH, errField = Just $ show t, expectedValue = Just $ show cnames}
         Just k -> pure (to k)
   where
     cnames = unTagged2 (constructorTags (keyModifier opts) :: Tagged2 (Rep a) [String])
@@ -523,7 +523,7 @@ typeMismatch expected actual =
 -- > -- Error: "unexpected String"
 unexpected :: Value -> Parser a
 unexpected actual = fail $ show $
-        defaultErrorObject {errorType = GENERAL, message = Just $ "unexpected " ++ typeOf actual}
+        defaultErrorObject {errorType = GENERAL, errMessage = Just $ "unexpected " ++ typeOf actual}
 
 -- | JSON type of a value, name of the head constructor.
 typeOf :: Value -> String
@@ -824,7 +824,7 @@ parseFieldMaybe' = (.:!)
 explicitParseField :: (Value -> Parser a) -> Object -> Text -> Parser a
 explicitParseField p obj key = case H.lookup key obj of
     Nothing -> fail $ show $
-        defaultErrorObject {errorType = MISSING_FIELD, field = Just $ unpack $ key}
+        defaultErrorObject {errorType = MISSING_FIELD, errField = Just $ unpack $ key}
     Just v  -> p v <?> Key key
 
 -- | Variant of '.:?' with explicit parser function.
@@ -1870,7 +1870,7 @@ instance (FromJSON v) => FromJSON (Tree.Tree v) where
 
 instance FromJSON UUID.UUID where
     parseJSON = withText "UUID" $
-        maybe (fail $ show $ defaultErrorObject {message = Just $ "invalid UUID"}) pure . UUID.fromText
+        maybe (fail $ show $ defaultErrorObject {errMessage = Just $ "invalid UUID"}) pure . UUID.fromText
 
 instance FromJSONKey UUID.UUID where
     fromJSONKey = FromJSONKeyTextParser $

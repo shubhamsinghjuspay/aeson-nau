@@ -424,7 +424,7 @@ eitherDecodeWith p to s =
       L.Done _ v     -> case to v of
                           ISuccess a      -> Right a
                           IError path err -> Left (path, addFieldNameToErrorResp path err)
-      L.Fail _ ctx msg -> Left ([], show $ defaultErrorObject {message = Just $ buildMsg ctx msg})
+      L.Fail _ ctx msg -> Left ([], show $ defaultErrorObject {errMessage = Just $ buildMsg ctx msg})
   where
     buildMsg :: [String] -> String -> String
     buildMsg [] msg = msg
@@ -435,7 +435,7 @@ eitherDecodeWith p to s =
 eitherDecodeStrictWith :: Parser Value -> (Value -> IResult a) -> B.ByteString
                        -> Either (JSONPath, String) a
 eitherDecodeStrictWith p to s =
-    case either (\err -> IError [] $ show $ defaultErrorObject {message = Just $ err}) to (A.parseOnly p s) of
+    case either (\err -> IError [] $ show $ defaultErrorObject {errMessage = Just $ err}) to (A.parseOnly p s) of
       ISuccess a      -> Right a
       IError path err -> Left (path, addFieldNameToErrorResp path err)
 {-# INLINE eitherDecodeStrictWith #-}
