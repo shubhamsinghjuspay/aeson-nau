@@ -611,7 +611,7 @@ typeMismatchErr objectType expected actual = show $
 
 missingFieldErr :: Maybe String -> String -> String
 missingFieldErr objectType field = show $
-            defaultErrorObject {errorType = MISSING_FIELD, errField = objectType}
+            defaultErrorObject {errorType = MISSING_FIELD, errField = Just field, objectType = objectType}
 -- | A key\/value pair for an 'Object'.
 type Pair = (Text, Value)
 
